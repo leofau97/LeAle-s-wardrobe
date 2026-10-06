@@ -80,6 +80,7 @@ h1{font:400 clamp(38px,6vw,68px)/1 var(--d);letter-spacing:-.03em;margin:0 0 8px
 .ly img{width:34px;height:34px;object-fit:contain}.ly span{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ly button{border:0;background:none;padding:4px 6px;border-radius:6px}.ly button:hover{background:var(--line)}
 .saved{display:flex;flex-wrap:wrap;gap:8px}.sv{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:99px;padding:5px 6px 5px 14px;background:var(--sf)}.sv button{border:0;background:var(--tile);border-radius:99px;padding:5px 10px}
+.sty{margin-bottom:8px}.sg{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;font-size:13px;background:var(--tile)}.sg b{display:block;font-size:14px;margin-bottom:2px}.sg button{margin-top:8px;padding:6px 14px}
 @media(max-width:1000px){.bld{grid-template-columns:1fr}.bside{position:static;max-height:none}}
 @media(max-width:700px){.sw{min-width:100%;order:3}.grid{grid-template-columns:repeat(2,1fr);gap:18px 12px}.dlg{grid-template-columns:1fr}.brand{font-size:20px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -122,6 +123,7 @@ h1{font:400 clamp(38px,6vw,68px)/1 var(--d);letter-spacing:-.03em;margin:0 0 8px
       <div class="own2" id="pOwner" hidden><button data-po="Leonardo">Capi di Leonardo</button><button data-po="Alessia">Capi di Alessia</button></div>
       <div class="chips" id="pChips"></div>
       <div class="pitems" id="pItems"></div>
+      <div class="sty"><input class="q" id="sIn" style="max-width:none;width:100%;border-radius:10px" placeholder="Cosa mi metto? es. cena elegante"><button class="btn pri" id="sGo" style="width:100%;margin-top:6px">Chiedi all'AI stylist</button><div id="sug"></div></div>
       <h3 class="h3">Livelli</h3><div id="layers"></div>
     </aside>
   </main>
@@ -140,7 +142,8 @@ h1{font:400 clamp(38px,6vw,68px)/1 var(--d);letter-spacing:-.03em;margin:0 0 8px
       <input id="inGal" type="file" accept="image/*" hidden>
       <div id="cutBox" hidden>
         <label class="row"><input type="checkbox" id="cutOn" checked> Rimuovi lo sfondo</label>
-        <label class="row">Sensibilità <input type="range" id="tol" min="12" max="110" value="45"></label>
+        <label class="row">Metodo <select id="cutMode"><option value="ai">AI (consigliato)</option><option value="simple">Semplice</option></select></label>
+        <label class="row">Sensibilità (metodo semplice) <input type="range" id="tol" min="12" max="110" value="45"></label>
         <div style="font-size:12px;color:var(--mut)">Funziona meglio con sfondo uniforme e a contrasto. Se mangia pezzi del capo, abbassa la sensibilità.</div>
       </div>
     </div>
@@ -240,26 +243,58 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 $('bCam').onclick=()=>$('inCam').click();$('bGal').onclick=()=>$('inGal').click();
 $('inCam').onchange=$('inGal').onchange=e=>{onFile(e.target.files[0]);e.target.value=''};
 
+let aiC=null,lastOut=null,rbMod=null;
+const pngBlob=c=>new Promise(r=>c.toBlob(r,'image/png'));
+function trimA(c){const w=c.width,h=c.height,p=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;let x0=w,y0=h,x1=0,y1=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(p[(y*w+x)*4+3]>20){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}if(x1<=x0)return c;const W=x1-x0+1,H=y1-y0+1,o=document.createElement('canvas');o.width=W;o.height=H;o.getContext('2d').drawImage(c,x0,y0,W,H,0,0,W,H);return o}
+// Scontorno AI nel browser (modello ONNX, scaricato la prima volta e poi in cache)
+async function aiCut(c){
+  rbMod??=await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm');
+  const rm=rbMod.removeBackground||rbMod.default,blob=await rm(await pngBlob(c)),bmp=await createImageBitmap(blob);
+  const o=document.createElement('canvas');o.width=bmp.width;o.height=bmp.height;o.getContext('2d').drawImage(bmp,0,0);return trimA(o);
+}
+async function ai(body){
+  const{data}=await sb.auth.getSession();
+  const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session.access_token},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Errore AI');return j;
+}
+async function aiTag(c){
+  $('stat').textContent='Riconosco il capo…';
+  try{
+    const s=Math.min(1,512/Math.max(c.width,c.height)),t=document.createElement('canvas');t.width=Math.round(c.width*s);t.height=Math.round(c.height*s);
+    const x=t.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,t.width,t.height);x.drawImage(c,0,0,t.width,t.height);
+    const r=await ai({task:'tag',image:t.toDataURL('image/jpeg',.8)});
+    if(CATS.includes(r.category))$('fCat').value=r.category;
+    if(r.name&&!$('fName').value)$('fName').value=r.name;
+    if(r.color)$('fColor').value=r.color;
+    if(r.brand&&!$('fBrand').value)$('fBrand').value=r.brand;
+  }catch(e){toast('Riconoscimento AI non disponibile: '+e.message)}
+  $('stat').textContent='';
+}
 async function onFile(f){
-  if(!f)return;$('stat').textContent='Elaboro la foto…';
+  if(!f)return;aiC=null;$('stat').textContent='Elaboro la foto…';
   try{
     const bmp=await createImageBitmap(f),s=Math.min(1,900/Math.max(bmp.width,bmp.height));
     const c=document.createElement('canvas');c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);
     c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
-    src=c;$('cutBox').hidden=false;await refresh(true);
-  }catch(e){toast('Non riesco a leggere questa foto');$('stat').textContent=''}
+    src=c;$('cutBox').hidden=false;showPrev(c.toDataURL('image/jpeg',.7));
+  }catch(e){toast('Non riesco a leggere questa foto');$('stat').textContent='';return}
+  if($('cutOn').checked&&$('cutMode').value==='ai'){
+    $('stat').textContent='Scontorno AI… la prima volta scarica il modello (~50 MB)';
+    try{aiC=await aiCut(src)}catch(e){console.warn(e);toast('Scontorno AI non disponibile, uso quello semplice')}
+  }
+  await refresh(true);aiTag(lastOut);
 }
 const toBlob=c=>new Promise(r=>c.toBlob(b=>r(b),'image/webp',.9));
 async function refresh(first){
   if(!src)return;
-  const out=$('cutOn').checked?cutout(src,+$('tol').value):src;
-  outBlob=await toBlob(out);
+  const out=!$('cutOn').checked?src:($('cutMode').value==='ai'&&aiC)?aiC:cutout(src,+$('tol').value);
+  lastOut=out;outBlob=await toBlob(out);
   if(prevUrl)URL.revokeObjectURL(prevUrl);
   prevUrl=URL.createObjectURL(outBlob);showPrev(prevUrl);
-  if(first&&!$('fColor').value)$('fColor').value=dominant(out);
+  if(first)$('fColor').value=dominant(out);
   $('stat').textContent='';
 }
-$('cutOn').onchange=()=>refresh();
+$('cutOn').onchange=$('cutMode').onchange=async()=>{if($('cutMode').value==='ai'&&!aiC&&src&&$('cutOn').checked){$('stat').textContent='Scontorno AI…';try{aiC=await aiCut(src)}catch(e){toast('Scontorno AI non disponibile')}}refresh()};
 $('tol').oninput=()=>{clearTimeout(timer);timer=setTimeout(refresh,160)};
 
 // ---- Scontorno: flood-fill dai bordi sul colore di sfondo, poi ritaglio ----
@@ -445,6 +480,24 @@ $('oSave').onclick=async()=>{
   const q=sb.from('outfits'),r=await((curOutfit&&curOutfit.owner===profile)?q.update(row).eq('id',curOutfit.id):q.insert(row)).select().single();
   if(r.error)return toast(r.error.message);
   curOutfit=r.data;updCur();loadOutfits();toast('Look salvato');
+};
+
+// ---- AI stylist ----
+async function weather(){try{const j=await(await fetch('https://api.open-meteo.com/v1/forecast?latitude=43.77&longitude=11.25&current=temperature_2m,precipitation&timezone=auto')).json();return Math.round(j.current.temperature_2m)+'°C'+(j.current.precipitation>0?', pioggia':'')}catch(e){return 'sconosciuto'}}
+let sugs=[];
+$('sGo').onclick=async()=>{
+  const b=$('sGo');b.disabled=true;b.textContent='Sto pensando…';
+  try{
+    const pool=items.filter(i=>owners().includes(i.owner));if(pool.length<3)throw new Error('Carica almeno 3 capi');
+    const r=await ai({task:'stylist',request:$('sIn').value,people:owners(),weather:await weather(),items:pool.map(i=>({id:i.id,owner:i.owner,name:i.name,category:i.category,color:i.color,brand:i.brand,favorite:i.favorite}))});
+    sugs=(r.looks||[]).map(l=>({...l,ids:(l.ids||[]).filter(id=>pool.some(i=>i.id===id))})).filter(l=>l.ids.length);
+    $('sug').innerHTML=sugs.map((l,i)=>`<div class="sg"><b>${esc(l.title)}</b>${esc(l.reason)}<br><button class="btn" data-w="${i}">Indossa</button></div>`).join('')||'<p class="mutt">Nessuna idea, riprova.</p>';
+  }catch(e){toast(e.message)}
+  b.disabled=false;b.textContent="Chiedi all'AI stylist";
+};
+$('sug').onclick=async e=>{
+  const b=e.target.closest('[data-w]');if(!b)return;look={Leonardo:[],Alessia:[]};sel=null;curOutfit=null;updCur();
+  for(const id of sugs[b.dataset.w].ids){const it=items.find(i=>i.id===id);if(it)await addG(it,it.owner)}
 };
 // Cambio vista
 function enterBuilder(){target=profile==='Alessia'?'Alessia':'Leonardo';panelOwner=target;curOutfit=null;sel=null;updCur();renderStage();renderPanel();renderLayers();loadOutfits()}
