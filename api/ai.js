@@ -25,7 +25,7 @@ async function groq(models, messages, vision) {
   }
   const r = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY } });
   const ids = ((await r.json()).data || []).map(x => x.id);
-  const guess = ids.filter(id => vision ? /scout|maverick|vision|qwen.*vl|vl/i.test(id) : /llama.*(70b|versatile)|gpt-oss|qwen/i.test(id) && !/guard|whisper|tts/i.test(id));
+  const guess = ids.filter(id => vision ? /scout|maverick|vision|vl|qwen\d/i.test(id) : /llama.*(70b|versatile)|gpt-oss|qwen/i.test(id) && !/guard|whisper|tts/i.test(id));
   for (const m of guess) { try { return parse(await call(m, messages)); } catch (e) { err = e; } }
   throw new Error(err.message + ' | Modelli disponibili sul tuo account: ' + ids.join(', '));
 }
