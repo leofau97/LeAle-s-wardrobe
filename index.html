@@ -67,8 +67,9 @@ h1{font:400 clamp(38px,6vw,68px)/1 var(--d);letter-spacing:-.03em;margin:0 0 8px
 .btool{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.mutt{color:var(--mut);font-size:13px}
 .bstage{display:flex;justify-content:center;gap:clamp(8px,4vw,60px);padding:22px 10px;border-radius:14px;background:radial-gradient(ellipse at 50% 30%,color-mix(in srgb,var(--sf) 70%,var(--tile)),var(--tile));transition:background .6s}
 .mq{display:flex;flex-direction:column;align-items:center}.mq .lab{font:600 18px var(--d);color:var(--mut);margin-bottom:6px}.mq.act .lab{color:var(--ac)}
-.mq svg{height:min(74vh,700px);aspect-ratio:300/700;width:auto;touch-action:none;overflow:visible;max-width:100%}
+.mq svg{height:min(74vh,700px);aspect-ratio:300/760;width:auto;touch-action:none;overflow:visible;max-width:100%}
 .gm{cursor:grab;filter:drop-shadow(0 5px 5px #0003)}.selg circle{fill:#fff;stroke:var(--ac);stroke-width:3;cursor:nwse-resize}
+.btn.on{background:var(--ac);border-color:var(--ac);color:#fff}#ed{max-width:100%;max-height:380px;touch-action:none;cursor:crosshair}
 .h3{font:400 24px var(--d);margin:26px 0 12px}
 .bside{background:var(--sf);border:1px solid var(--line);border-radius:14px;padding:14px;position:sticky;top:84px;max-height:calc(100vh - 100px);overflow:auto}
 .own2{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}.own2 button{border:1px solid var(--line);background:none;border-radius:10px;padding:8px}.own2 button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -133,18 +134,17 @@ h1{font:400 clamp(38px,6vw,68px)/1 var(--d);letter-spacing:-.03em;margin:0 0 8px
   <div class="dlg">
     <h2 id="mTitle"></h2>
     <div>
-      <div class="photo"><img id="prev" alt="" hidden><span id="noPrev" style="color:var(--mut)">Nessuna foto</span></div>
-      <div class="ph">
-        <button class="btn" id="bCam" type="button">Scatta</button>
-        <button class="btn" id="bGal" type="button">Dalla galleria</button>
-      </div>
+      <div class="photo"><canvas id="ed" hidden></canvas><img id="prev" alt="" hidden><span id="noPrev" style="color:var(--mut)">Nessuna foto</span></div>
+      <div class="ph"><button class="btn" id="bCam" type="button">Scatta</button><button class="btn" id="bGal" type="button">Dalla galleria</button></div>
       <input id="inCam" type="file" accept="image/*" capture="environment" hidden>
       <input id="inGal" type="file" accept="image/*" hidden>
-      <div id="cutBox" hidden>
-        <label class="row"><input type="checkbox" id="cutOn" checked> Rimuovi lo sfondo</label>
-        <label class="row">Metodo <select id="cutMode"><option value="ai">AI (consigliato)</option><option value="simple">Semplice</option></select></label>
-        <label class="row">Sensibilità (metodo semplice) <input type="range" id="tol" min="12" max="110" value="45"></label>
-        <div style="font-size:12px;color:var(--mut)">Funziona meglio con sfondo uniforme e a contrasto. Se mangia pezzi del capo, abbassa la sensibilità.</div>
+      <div id="tools" hidden>
+        <div class="ph" id="tCrop" hidden><button class="btn pri" id="bCrop" type="button">Ritaglia e scontorna</button><button class="btn" id="bSkip" type="button">Usa tutta la foto</button></div>
+        <div id="tEdit" hidden>
+          <div class="ph"><button class="btn on" id="tErase" type="button">Gomma</button><button class="btn" id="tRestore" type="button">Pennello</button><button class="btn" id="bUndo" type="button">Annulla</button></div>
+          <label class="row">Dimensione <input type="range" id="bs" min="8" max="90" value="30"></label>
+          <div class="ph"><button class="btn" id="bRecut" type="button">Rifai scontorno AI</button><button class="btn" id="bSimple" type="button">Scontorno semplice</button><button class="btn" id="bBack" type="button">Ritaglia di nuovo</button></div>
+        </div>
       </div>
     </div>
     <div>
@@ -228,13 +228,13 @@ $('grid').onclick=async e=>{
 
 // ---- Modale capo ----
 $('fCat').innerHTML=CATS.map(c=>`<option>${c}</option>`).join('');
-function showPrev(url){$('prev').src=url||'';$('prev').hidden=!url;$('noPrev').hidden=!!url}
+function showPrev(url){$('prev').src=url||'';$('prev').hidden=!url;$('noPrev').hidden=!!url;$('ed').hidden=true;$('tools').hidden=true}
 function openModal(it){
   editing=it||null;src=null;outBlob=null;
   $('mTitle').textContent=it?'Modifica capo':'Nuovo capo';
   $('fName').value=it?.name||'';$('fCat').value=it?.category||CATS[0];$('fColor').value=it?.color||'';$('fBrand').value=it?.brand||'';
   $('fOwnerWrap').hidden=profile!=='Coppia';$('fOwner').value=it?.owner||'Leonardo';
-  showPrev(it?.url);$('cutBox').hidden=true;$('del').hidden=!it;$('stat').textContent='';
+  showPrev(it?.url);E=E0();$('del').hidden=!it;$('stat').textContent='';
   $('modal').classList.add('open');
 }
 const closeModal=()=>$('modal').classList.remove('open');
@@ -243,22 +243,24 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 $('bCam').onclick=()=>$('inCam').click();$('bGal').onclick=()=>$('inGal').click();
 $('inCam').onchange=$('inGal').onchange=e=>{onFile(e.target.files[0]);e.target.value=''};
 
-let aiC=null,lastOut=null,rbMod=null;
 const pngBlob=c=>new Promise(r=>c.toBlob(r,'image/png'));
+const toBlob=c=>new Promise(r=>c.toBlob(b=>r(b),'image/webp',.9));
+let rbMod=null;
 function trimA(c){const w=c.width,h=c.height,p=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data;let x0=w,y0=h,x1=0,y1=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(p[(y*w+x)*4+3]>20){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}if(x1<=x0)return c;const W=x1-x0+1,H=y1-y0+1,o=document.createElement('canvas');o.width=W;o.height=H;o.getContext('2d').drawImage(c,x0,y0,W,H,0,0,W,H);return o}
-// Scontorno AI nel browser (modello ONNX, scaricato la prima volta e poi in cache)
+// Scontorno AI nel browser: stesse dimensioni dell'input, così gomma e pennello restano allineati
 async function aiCut(c){
   rbMod??=await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm');
-  const rm=rbMod.removeBackground||rbMod.default,blob=await rm(await pngBlob(c)),bmp=await createImageBitmap(blob);
-  const o=document.createElement('canvas');o.width=bmp.width;o.height=bmp.height;o.getContext('2d').drawImage(bmp,0,0);return trimA(o);
+  const rm=rbMod.removeBackground||rbMod.default,bmp=await createImageBitmap(await rm(await pngBlob(c))),o=document.createElement('canvas');
+  o.width=c.width;o.height=c.height;o.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return o;
 }
 async function ai(body){
   const{data}=await sb.auth.getSession();
   const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session.access_token},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Errore AI');return j;
 }
+// Groq (visione): guarda il capo e compila nome, categoria, colore e marca
 async function aiTag(c){
-  $('stat').textContent='Riconosco il capo…';
+  $('stat').textContent='✨ L\'AI sta guardando il capo…';
   try{
     const s=Math.min(1,512/Math.max(c.width,c.height)),t=document.createElement('canvas');t.width=Math.round(c.width*s);t.height=Math.round(c.height*s);
     const x=t.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,t.width,t.height);x.drawImage(c,0,0,t.width,t.height);
@@ -267,38 +269,63 @@ async function aiTag(c){
     if(r.name&&!$('fName').value)$('fName').value=r.name;
     if(r.color)$('fColor').value=r.color;
     if(r.brand&&!$('fBrand').value)$('fBrand').value=r.brand;
-  }catch(e){toast('Riconoscimento AI non disponibile: '+e.message)}
-  $('stat').textContent='';
+    $('stat').textContent='✨ Compilato dall\'AI (Groq): controlla e correggi i campi.';
+  }catch(e){$('stat').textContent='';toast('AI non disponibile: '+e.message)}
+}
+// ---- Editor foto: ritaglio, scontorno, gomma e pennello ----
+const E0=()=>({full:null,orig:null,mode:'',tool:'erase',undo:[],rect:null,tagged:false});let E=E0();
+function showEd(){$('prev').hidden=true;$('noPrev').hidden=true;$('ed').hidden=false;$('tools').hidden=false;$('tCrop').hidden=E.mode!=='crop';$('tEdit').hidden=E.mode!=='edit'}
+const rectN=()=>{const r=E.rect;return{a:Math.min(r.x0,r.x1),b:Math.min(r.y0,r.y1),w:Math.abs(r.x1-r.x0),h:Math.abs(r.y1-r.y0)}};
+function drawEd(){
+  const c=$('ed'),x=c.getContext('2d');c.width=E.full.width;c.height=E.full.height;x.drawImage(E.full,0,0);
+  if(E.rect){const{a,b,w,h}=rectN();x.fillStyle='#0009';x.fillRect(0,0,c.width,c.height);if(w>2&&h>2)x.drawImage(E.full,a,b,w,h,a,b,w,h);x.setLineDash([12,9]);x.lineWidth=Math.max(2,c.width/260);x.strokeStyle='#fff';x.strokeRect(a,b,w,h)}
 }
 async function onFile(f){
-  if(!f)return;aiC=null;$('stat').textContent='Elaboro la foto…';
+  if(!f)return;
   try{
-    const bmp=await createImageBitmap(f),s=Math.min(1,900/Math.max(bmp.width,bmp.height));
-    const c=document.createElement('canvas');c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);
-    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
-    src=c;$('cutBox').hidden=false;showPrev(c.toDataURL('image/jpeg',.7));
-  }catch(e){toast('Non riesco a leggere questa foto');$('stat').textContent='';return}
-  if($('cutOn').checked&&$('cutMode').value==='ai'){
-    $('stat').textContent='Scontorno AI… la prima volta scarica il modello (~50 MB)';
-    try{aiC=await aiCut(src)}catch(e){console.warn(e);toast('Scontorno AI non disponibile, uso quello semplice')}
-  }
-  await refresh(true);aiTag(lastOut);
+    const bmp=await createImageBitmap(f),s=Math.min(1,1600/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');
+    c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+    E=E0();E.full=c;E.mode='crop';showEd();drawEd();$('stat').textContent='Trascina sulla foto per selezionare solo il capo, poi "Ritaglia e scontorna".';
+  }catch(e){toast('Non riesco a leggere questa foto')}
 }
-const toBlob=c=>new Promise(r=>c.toBlob(b=>r(b),'image/webp',.9));
-async function refresh(first){
-  if(!src)return;
-  const out=!$('cutOn').checked?src:($('cutMode').value==='ai'&&aiC)?aiC:cutout(src,+$('tol').value);
-  lastOut=out;outBlob=await toBlob(out);
-  if(prevUrl)URL.revokeObjectURL(prevUrl);
-  prevUrl=URL.createObjectURL(outBlob);showPrev(prevUrl);
-  if(first)$('fColor').value=dominant(out);
-  $('stat').textContent='';
+const ep=e=>{const r=$('ed').getBoundingClientRect(),s=$('ed').width/r.width;return{x:(e.clientX-r.left)*s,y:(e.clientY-r.top)*s,s}};
+function stroke(a,b){
+  const x=$('ed').getContext('2d'),r=$('bs').value*a.s/2,n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(r/3)));
+  for(let i=0;i<=n;i++){const px=a.x+(b.x-a.x)*i/n,py=a.y+(b.y-a.y)*i/n;x.save();x.beginPath();x.arc(px,py,r,0,7);
+    if(E.tool==='erase'){x.globalCompositeOperation='destination-out';x.fill()}else{x.clip();x.drawImage(E.orig,0,0)}x.restore()}
 }
-$('cutOn').onchange=$('cutMode').onchange=async()=>{if($('cutMode').value==='ai'&&!aiC&&src&&$('cutOn').checked){$('stat').textContent='Scontorno AI…';try{aiC=await aiCut(src)}catch(e){toast('Scontorno AI non disponibile')}}refresh()};
-$('tol').oninput=()=>{clearTimeout(timer);timer=setTimeout(refresh,160)};
+$('ed').addEventListener('pointerdown',e=>{
+  if(!E.mode)return;e.preventDefault();const c=$('ed'),x=c.getContext('2d',{willReadFrequently:true});c.setPointerCapture(e.pointerId);
+  const p=ep(e);let last=p;
+  if(E.mode==='crop')E.rect={x0:p.x,y0:p.y,x1:p.x,y1:p.y};
+  else{E.undo.push(x.getImageData(0,0,c.width,c.height));if(E.undo.length>12)E.undo.shift();stroke(p,p)}
+  const mv=ev=>{const q=ep(ev);if(E.mode==='crop'){E.rect.x1=q.x;E.rect.y1=q.y;drawEd()}else{stroke(last,q);last=q}},
+  up=()=>{c.removeEventListener('pointermove',mv);c.removeEventListener('pointerup',up)};
+  c.addEventListener('pointermove',mv);c.addEventListener('pointerup',up);
+});
+async function startCut(o){
+  const m=Math.max(o.width,o.height);if(m>1000){const k=1000/m,t=document.createElement('canvas');t.width=Math.round(o.width*k);t.height=Math.round(o.height*k);t.getContext('2d').drawImage(o,0,0,t.width,t.height);o=t}
+  E.orig=o;E.mode='edit';E.undo=[];const c=$('ed');c.width=o.width;c.height=o.height;c.getContext('2d').drawImage(o,0,0);showEd();await runCut('ai');
+}
+async function runCut(method){
+  const c=$('ed'),x=c.getContext('2d'),st=$('stat');E.undo.push(x.getImageData(0,0,c.width,c.height));
+  st.textContent=method==='ai'?'Scontorno AI in corso… la prima volta scarica il modello (~50 MB)':'Scontorno semplice…';
+  try{
+    const r=method==='ai'?await aiCut(E.orig):cutout(E.orig,30,true);
+    x.clearRect(0,0,c.width,c.height);x.drawImage(r,0,0);st.textContent='Fatto. Rifinisci con Gomma e Pennello.';
+    if(!E.tagged){E.tagged=true;$('fColor').value=dominant(trimA(c));aiTag(trimA(c))}
+  }catch(e){console.warn(e);st.textContent='Scontorno automatico non riuscito ('+(e.message||e)+'). La foto è intatta: usa la gomma, o prova "Scontorno semplice".'}
+}
+$('bCrop').onclick=()=>{let o=E.full;if(E.rect){const{a,b,w,h}=rectN();if(w>20&&h>20){o=document.createElement('canvas');o.width=Math.round(w);o.height=Math.round(h);o.getContext('2d').drawImage(E.full,a,b,w,h,0,0,o.width,o.height)}}startCut(o)};
+$('bSkip').onclick=()=>startCut(E.full);
+const setTool=t=>{E.tool=t;$('tErase').classList.toggle('on',t==='erase');$('tRestore').classList.toggle('on',t==='restore')};
+$('tErase').onclick=()=>setTool('erase');$('tRestore').onclick=()=>setTool('restore');
+$('bUndo').onclick=()=>{const d=E.undo.pop();if(d)$('ed').getContext('2d').putImageData(d,0,0)};
+$('bRecut').onclick=()=>runCut('ai');$('bSimple').onclick=()=>runCut('simple');
+$('bBack').onclick=()=>{if(!E.full)return toast('Ricarica la foto per ritagliare di nuovo');E.mode='crop';E.rect=null;showEd();drawEd()};
 
 // ---- Scontorno: flood-fill dai bordi sul colore di sfondo, poi ritaglio ----
-function cutout(srcC,tol){
+function cutout(srcC,tol,noTrim){
   const w=srcC.width,h=srcC.height,c=document.createElement('canvas');c.width=w;c.height=h;
   const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(srcC,0,0);
   const im=x.getImageData(0,0,w,h),p=im.data;
@@ -318,7 +345,7 @@ function cutout(srcC,tol){
     if(p[i+3]>20){const y=(k/w)|0;if(cx<x0)x0=cx;if(cx>x1)x1=cx;if(y<y0)y0=y;if(y>y1)y1=y}
   }
   x.putImageData(im,0,0);
-  if(x1<=x0||y1<=y0)return srcC;
+  if(noTrim||x1<=x0||y1<=y0)return c;
   const pad=Math.round(Math.max(x1-x0,y1-y0)*.02),X=Math.max(0,x0-pad),Y=Math.max(0,y0-pad),W=Math.min(w,x1+pad+1)-X,H=Math.min(h,y1+pad+1)-Y;
   const o=document.createElement('canvas');o.width=W;o.height=H;o.getContext('2d').drawImage(c,X,Y,W,H,0,0,W,H);return o;
 }
@@ -348,6 +375,8 @@ $('save').onclick=async()=>{
   const btn=$('save');btn.disabled=true;
   try{
     const owner=profile==='Coppia'?$('fOwner').value:(editing?.owner||profile);
+    if(E.full&&E.mode!=='edit')return toast('Prima ritaglia e scontorna la foto');
+    outBlob=E.mode==='edit'?await toBlob(trimA($('ed'))):null;
     let path=editing?.image_path;
     if(outBlob){
       const ext=outBlob.type==='image/webp'?'webp':'png',np=`${owner}/${crypto.randomUUID()}.${ext}`;
@@ -373,30 +402,34 @@ $('del').onclick=async()=>{
 
 // ================= BUILDER =================
 let view='wardrobe',look={Leonardo:[],Alessia:[]},sel=null,target='Leonardo',panelOwner='Leonardo',bcat='Tutti',curOutfit=null;
-// Misure dei due manichini (spazio 300x700). sh=spalle, hip=bacino, topY=attaccatura spalle, waistY=cintura
-const BODY={
- Leonardo:{fill:'#cfc7b8',sh:144,hip:104,topY:124,waistY:312,
-  torso:'M78 132Q150 118 222 132L214 200Q206 270 200 330L100 330Q94 270 86 200Z',
-  arm:'M80 134Q62 138 58 160L50 330L72 334L88 200Z',
-  legs:['M100 330L150 330L146 640L118 640Z','M150 330L200 330L182 640L154 640Z']},
- Alessia:{fill:'#e3c6cd',sh:112,hip:108,topY:126,waistY:290,
-  torso:'M94 136Q150 122 206 136L200 200Q190 240 186 270Q205 310 204 345L96 345Q95 310 114 270Q110 240 100 200Z',
-  arm:'M96 138Q80 142 77 162L70 320L88 324L102 205Z',
-  legs:['M98 345L150 345L146 640L120 640Z','M150 345L202 345L180 640L154 640Z']}};
+// Manichini generati dalle misure reali (altezza cm, peso kg). Il peso serve solo a calcolare la corporatura e non viene mai mostrato.
+const K=3.7,FL=730;
+function mkBody(H,kg,fem,fill){
+  const bmi=kg/(H/100)**2,c=150,y=f=>FL-f*H*K,u=H*K/700,d=fem?bmi-21:bmi-22,
+    sh=(fem?.225:.25)*H*(1+d*.012)*K,wa=(fem?.165:.17)*H*(1+d*.035)*K/2,hw=(fem?.215:.185)*H*(1+d*.03)*K/2,
+    sy=y(.818),wy=y(.62),hy=y(.5),aw=.038*H*K,al=.4*H*K,s=sh*.46,an=.055*H*K,hr=.042*H*K,nw=.022*H*K;
+  const leg=m=>`M${c-m*hw} ${hy}L${c-m} ${hy}L${c-m*hw*.12} ${FL-30}L${c-m*hw*.12-an} ${FL-30}Z`;
+  return{fill,H,u,sh,hip:hw*2,topY:sy-4,waistY:wy,floor:FL,
+    head:`<ellipse cx="${c}" cy="${y(.935)}" rx="${hr}" ry="${.062*H*K}"/><rect x="${c-nw}" y="${y(.875)}" width="${nw*2}" height="${sy-y(.875)+4}" rx="6"/>`,
+    torso:`M${c-s} ${sy}Q${c} ${sy-8} ${c+s} ${sy}L${c+wa} ${wy}L${c+hw} ${hy}L${c-hw} ${hy}L${c-wa} ${wy}Z`,
+    arm:`M${c+s*.9} ${sy-2}Q${c+sh/2+4} ${sy-2} ${c+sh/2} ${sy+aw*1.3}L${c+hw+aw*.55} ${sy+al}L${c+hw-aw*.25} ${sy+al}L${c+s*.78} ${sy+aw*2}Z`,
+    legs:[leg(1),`M${c+hw} ${hy}L${c+1} ${hy}L${c+hw*.12} ${FL-30}L${c+hw*.12+an} ${FL-30}Z`]};
+}
+const BODY={Leonardo:mkBody(183,80,false,'#cfc7b8'),Alessia:mkBody(160,50,true,'#e3c6cd')};
 const TOPS=['Maglie','Camicie','Felpe','Maglioni'],BOT=['Jeans','Pantaloni'];
 // Ordine di default dei livelli: scarpe sotto i pantaloni, giacche sopra tutto
 const BASEZ={Scarpe:0,Jeans:1,Pantaloni:1,Gonne:1,Vestiti:2,Maglie:3,Camicie:4,Maglioni:5,Felpe:6,Giacche:8,Accessori:9};
 function fit(o,cat,ar){
-  const b=BODY[o];let w,top,maxH;
-  if(TOPS.includes(cat)){w=b.sh*1.45;top=b.topY;maxH=b.waistY-b.topY+70}
-  else if(cat==='Giacche'){w=b.sh*1.6;top=b.topY-4;maxH=b.waistY-b.topY+110}
-  else if(cat==='Vestiti'){w=b.sh*1.4;top=b.topY;maxH=400}
-  else if(BOT.includes(cat)){w=b.hip*1.3;top=b.waistY-6;maxH=345}
-  else if(cat==='Gonne'){w=b.hip*1.35;top=b.waistY-6;maxH=230}
-  else if(cat==='Scarpe'){w=118;top=0;maxH=70}
-  else{w=64;top=96;maxH=80}
+  const b=BODY[o],u=b.u;let w,top,maxH;
+  if(TOPS.includes(cat)){w=b.sh*1.15;top=b.topY;maxH=b.waistY-b.topY+70*u}
+  else if(cat==='Giacche'){w=b.sh*1.25;top=b.topY-4*u;maxH=b.waistY-b.topY+110*u}
+  else if(cat==='Vestiti'){w=b.sh*1.15;top=b.topY;maxH=400*u}
+  else if(BOT.includes(cat)){w=b.hip*1.15;top=b.waistY-6*u;maxH=b.floor-b.waistY}
+  else if(cat==='Gonne'){w=b.hip*1.25;top=b.waistY-6*u;maxH=230*u}
+  else if(cat==='Scarpe'){w=118*u;top=0;maxH=70*u}
+  else{w=64*u;top=b.topY-28*u;maxH=80*u}
   let h=w/ar;if(h>maxH){h=maxH;w=h*ar}
-  return{x:150,y:cat==='Scarpe'?672-h/2:top+h/2,w,h};
+  return{x:150,y:cat==='Scarpe'?b.floor-h/2:top+h/2,w,h};
 }
 async function addG(it,o){
   const im=new Image();im.src=it.url;try{await im.decode()}catch(e){}
@@ -408,8 +441,8 @@ const owners=()=>profile==='Coppia'?['Leonardo','Alessia']:[profile];
 function renderStage(){
   $('bstage').innerHTML=owners().map(o=>{const b=BODY[o];
     const imgs=look[o].map(g=>{const it=items.find(i=>i.id===g.itemId);return it?`<image class="gm" data-u="${g.u}" href="${it.url}" preserveAspectRatio="none"/>`:''}).join('');
-    return `<div class="mq ${o===target?'act':''}" data-o="${o}"><div class="lab">${o}</div><svg viewBox="0 0 300 700" data-o="${o}">
-    <g fill="${b.fill}"><ellipse cx="150" cy="58" rx="26" ry="32"/><rect x="138" y="88" width="24" height="36" rx="8"/><path d="${b.torso}"/><path d="${b.arm}"/><path d="${b.arm}" transform="translate(300 0) scale(-1 1)"/>${b.legs.map(d=>`<path d="${d}"/>`).join('')}</g>
+    return `<div class="mq ${o===target?'act':''}" data-o="${o}"><div class="lab">${o}</div><svg viewBox="0 0 300 760" data-o="${o}">
+    <g fill="${b.fill}">${b.head}<path d="${b.torso}"/><path d="${b.arm}"/><path d="${b.arm}" transform="translate(300 0) scale(-1 1)"/>${b.legs.map(d=>`<path d="${d}"/>`).join('')}</g>
     ${imgs}<g class="selg"><rect fill="none" stroke="var(--ac)" stroke-width="2" stroke-dasharray="6 5"/>${['nw','ne','sw','se'].map(h=>`<circle data-h="${h}" r="9"/>`).join('')}</g></svg></div>`}).join('');
   sync();
 }
